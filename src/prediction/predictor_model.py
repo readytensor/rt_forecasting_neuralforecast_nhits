@@ -9,11 +9,13 @@ from neuralforecast.models import NHITS
 from neuralforecast import NeuralForecast
 from pytorch_lightning.callbacks import EarlyStopping
 import torch
+from logger import get_logger
 
 warnings.filterwarnings("ignore")
 
 
 PREDICTOR_FILE_NAME = "predictor.joblib"
+logger = get_logger(task_name="model")
 
 
 class Forecaster:
@@ -125,6 +127,21 @@ class Forecaster:
         """
         self.data_schema = data_schema
         self.lags = lags
+        self.stack_types = stack_types
+        self.n_blocks = n_blocks
+        self.mlp_units = mlp_units
+        self.n_pool_kernel_size = n_pool_kernel_size
+        self.n_freq_downsample = n_freq_downsample
+        self.pooling_mode = pooling_mode
+        self.interpolation_mode = interpolation_mode
+        self.dropout_prob_theta = dropout_prob_theta
+        self.activation = activation
+        self.max_steps = max_steps
+        self.learning_rate = learning_rate
+        self.num_lr_decays = num_lr_decays
+        self.batch_size = batch_size
+        self.step_size = step_size
+        self.local_scaler_type = local_scaler_type
         self.use_exogenous = use_exogenous
         self.random_state = random_state
         self._is_trained = False
@@ -157,46 +174,17 @@ class Forecaster:
             if trainer_kwargs.get("accelerator") == "gpu":
                 trainer_kwargs.pop("accelerator")
 
-        hist_exog_list = None
-        stat_exog_list = None
+        self.trainer_kwargs = trainer_kwargs
+
+        self.hist_exog_list = None
+        self.stat_exog_list = None
 
         if use_exogenous:
             if data_schema.past_covariates:
-                hist_exog_list = data_schema.past_covariates
+                self.hist_exog_list = data_schema.past_covariates
 
             if data_schema.static_covariates:
-                stat_exog_list = data_schema.static_covariates
-
-        models = [
-            NHITS(
-                h=data_schema.forecast_length,
-                hist_exog_list=hist_exog_list,
-                stat_exog_list=stat_exog_list,
-                input_size=self.lags,
-                stack_types=stack_types,
-                n_blocks=n_blocks,
-                mlp_units=mlp_units,
-                n_freq_downsample=n_freq_downsample,
-                interpolation_mode=interpolation_mode,
-                n_pool_kernel_size=n_pool_kernel_size,
-                pooling_mode=pooling_mode,
-                dropout_prob_theta=dropout_prob_theta,
-                activation=activation,
-                max_steps=max_steps,
-                learning_rate=learning_rate,
-                num_lr_decays=num_lr_decays,
-                batch_size=batch_size,
-                step_size=step_size,
-                random_seed=random_state,
-                **trainer_kwargs,
-            )
-        ]
-
-        self.model = NeuralForecast(
-            models=models,
-            freq=self.map_frequency(data_schema.frequency),
-            local_scaler_type=local_scaler_type,
-        )
+                self.stat_exog_list = data_schema.static_covariates
 
     def map_frequency(self, frequency: str) -> str:
         """
@@ -299,6 +287,28 @@ class Forecaster:
 
         return futr_df
 
+    def _validate_lags_and_history_length(self, series_length: int):
+        """
+        Validate the value of lags and that history length is at least double the forecast horizon.
+        If the provided lags value is invalid (too large), lags are set to the largest possible value.
+
+        Args:
+            series_length (int): The length of the history.
+
+        Returns: None
+        """
+        forecast_length = self.data_schema.forecast_length
+        if series_length < 2 * forecast_length:
+            raise ValueError(
+                f"Training series is too short. History should be at least double the forecast horizon. history_length = ({series_length}), forecast horizon = ({forecast_length})"
+            )
+
+        if self.lags >= series_length:
+            self.lags = series_length - 1
+            logger.warning(
+                f"The provided lags value >= available history length. Lags are set to to (history length - 1) = {series_length-1}"
+            )
+
     def fit(
         self,
         history: pd.DataFrame,
@@ -313,9 +323,44 @@ class Forecaster:
 
         history = self.prepare_data(history)
 
+        series_length = history.groupby("unique_id")["y"].count().iloc[0]
+
+        self._validate_lags_and_history_length(series_length=series_length)
+
         static_df = None
         if self.use_exogenous and len(self.data_schema.static_covariates) > 0:
             static_df = self.generate_static_exogenous(history)
+
+        models = [
+            NHITS(
+                h=self.data_schema.forecast_length,
+                hist_exog_list=self.hist_exog_list,
+                stat_exog_list=self.stat_exog_list,
+                input_size=self.lags,
+                stack_types=self.stack_types,
+                n_blocks=self.n_blocks,
+                mlp_units=self.mlp_units,
+                n_freq_downsample=self.n_freq_downsample,
+                interpolation_mode=self.interpolation_mode,
+                n_pool_kernel_size=self.n_pool_kernel_size,
+                pooling_mode=self.pooling_mode,
+                dropout_prob_theta=self.dropout_prob_theta,
+                activation=self.activation,
+                max_steps=self.max_steps,
+                learning_rate=self.learning_rate,
+                num_lr_decays=self.num_lr_decays,
+                batch_size=self.batch_size,
+                step_size=self.step_size,
+                random_seed=self.random_state,
+                **self.trainer_kwargs,
+            )
+        ]
+
+        self.model = NeuralForecast(
+            models=models,
+            freq=self.map_frequency(self.data_schema.frequency),
+            local_scaler_type=self.local_scaler_type,
+        )
 
         self.model.fit(df=history, static_df=static_df)
         self._is_trained = True
