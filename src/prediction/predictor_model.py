@@ -9,6 +9,7 @@ from neuralforecast.models import NHITS
 from neuralforecast import NeuralForecast
 from pytorch_lightning.callbacks import EarlyStopping
 import torch
+from neuralforecast.losses.pytorch import MSE, MAE, MQLoss
 from logger import get_logger
 
 warnings.filterwarnings("ignore")
@@ -33,19 +34,19 @@ class Forecaster:
         history_forecast_ratio: int = None,
         lags_forecast_ratio: int = None,
         lags: int = None,
-        stack_types: list = ["identity", "identity", "identity"],
-        n_blocks: list = [1, 1, 1],
-        mlp_units: list = [[512, 512], [512, 512], [512, 512]],
+        stack_types: list = ["identity", "identity"],
+        n_blocks: list = [2, 2],
+        mlp_units: list = [[32, 32], [32, 32], [32, 32]],
         n_pool_kernel_size: list = [2, 2, 1],
         n_freq_downsample: list = [4, 2, 1],
         pooling_mode: str = "MaxPool1d",
         interpolation_mode: str = "linear",
-        dropout_prob_theta=0.0,
+        dropout_prob_theta=0.20,
         activation="ReLU",
         max_steps: int = 1000,
-        learning_rate: float = 0.001,
+        learning_rate: float = 1e-4,
         num_lr_decays: int = -1,
-        batch_size: int = 32,
+        batch_size: int = 64,
         early_stopping: bool = False,
         early_stop_patience_steps: int = 50,
         min_delta: float = 0.0005,
@@ -352,6 +353,7 @@ class Forecaster:
                 batch_size=self.batch_size,
                 step_size=self.step_size,
                 random_seed=self.random_state,
+                loss=MQLoss(),
                 **self.trainer_kwargs,
             )
         ]
