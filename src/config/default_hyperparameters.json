@@ -1,27 +1,16 @@
 {
   "history_forecast_ratio": 10,
-  "lags_forecast_ratio": 3,
-  "stack_types": [
-    "identity",
-    "identity"
-  ],
-  "n_blocks": [
-    2,
-    2
-  ],
+  "lags_forecast_ratio": 5,
+  "stack_types": ["identity", "identity", "identity"],
+  "n_blocks": [2, 2, 2],
   "mlp_units": [
-    [
-      64,
-      64
-    ],
-    [
-      64,
-      64
-    ]
+    [32, 32],
+    [32, 32],
+    [32, 32]
   ],
   "activation": "ReLU",
   "max_steps": 1000,
-  "learning_rate": 0.001,
+  "learning_rate": 1e-3,
   "num_lr_decays": 3,
   "local_scaler_type": "minmax",
   "early_stopping": true,
